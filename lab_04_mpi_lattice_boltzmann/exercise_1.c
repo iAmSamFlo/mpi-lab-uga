@@ -48,12 +48,12 @@ void lbm_comm_init_ex1(lbm_comm_t * comm, int total_width, int total_height)
 	if(total_width % comm->nb_x != 0){
 		fatal("nb_x does not divide total width!");
 	}
-	if(total_width % comm->nb_y != 0){
+	if(total_height % comm->nb_y != 0){
 		fatal("nb_y does not divide total width!");
 	}
 
 	// TODO: calculate the current task position in the splitting
-	comm->rank_x = rank % comm->nb_x;
+	comm->rank_x = rank;
 	comm->rank_y = 0;
 
 	// TODO : calculate the local sub-domain size (do not forget the 

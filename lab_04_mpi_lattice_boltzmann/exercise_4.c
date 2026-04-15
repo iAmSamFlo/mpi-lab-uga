@@ -23,6 +23,7 @@
 /****************************************************/
 #include "src/lbm_struct.h"
 #include "src/exercises.h"
+#include <math.h>
 
 /****************************************************/
 void lbm_comm_init_ex4(lbm_comm_t * comm, int total_width, int total_height)
@@ -31,25 +32,46 @@ void lbm_comm_init_ex4(lbm_comm_t * comm, int total_width, int total_height)
 	// TODO: calculate the splitting parameters for the current task.
 	//
 
+	//get infos
+	int rank;
+	int comm_size;
+	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+	MPI_Comm_size( MPI_COMM_WORLD, &comm_size );
+
+	//check
+	if (comm_size == 1)
+		fatal("Invalid communicator size, should not be 1 !");
+
+	int s = sqrt(comm_size);
+	if ((s * s) != comm_size) 
+		fatal("Invalid communicator size, should be an integer sqrt!");
+
 	// TODO: calculate the number of tasks along X axis and Y axis.
-	comm->nb_x = -1;
-	comm->nb_y = -1;
+	comm->nb_x = s;
+	comm->nb_y = s;
+
+	if(total_width % comm->nb_x != 0){
+		fatal("nb_x does not divide total width!");
+	}
+	if(total_height % comm->nb_y != 0){
+		fatal("nb_y does not divide total width!");
+	}
 
 	// TODO: calculate the current task position in the splitting
-	comm->rank_x = -1;
-	comm->rank_y = -1;
+	comm->rank_x = rank % comm->nb_x;
+    comm->rank_y = rank % comm->nb_y;
 
 	// TODO : calculate the local sub-domain size (do not forget the 
 	//        ghost cells). Use total_width & total_height as starting 
 	//        point.
-	comm->width = -1;
-	comm->height = -1;
+	comm->width = (total_width / comm->nb_x) + 2;
+	comm->height = (total_height / comm->nb_y) + 2;
 
 	// TODO : calculate the absolute position  (in cell number) in the global mesh.
 	//        without accounting the ghost cells
 	//        (used to setup the obstable & initial conditions).
-	comm->x = -1;
-	comm->y = -1;
+	comm->x = comm->rank_x * (total_width / comm->nb_x);
+	comm->y = comm->rank_y * (total_height / comm->nb_y);
 
 	//OPTIONAL : if you want to avoid allocating temporary copy buffer
 	//           for every step :
@@ -93,4 +115,19 @@ void lbm_comm_ghost_exchange_ex4(lbm_comm_t * comm, lbm_mesh_t * mesh)
 	//   - implement left/write communications
 	//   - implement top/bottom communication (non contiguous)
 	//   - implement diagonal communications
+
+	// int rank;
+	// int comm_size;
+	// MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+	// MPI_Comm_size( MPI_COMM_WORLD, &comm_size );
+	// MPI_Comm cart_comm;
+
+	// int dim[2] = {comm->nb_x, comm->nb_y};
+	// int periods[2] = {0, 0};
+
+	// MPI_Cart_create(MPI_COMM_WORLD, 2, dim, periods, 0, &cart_comm);
+
+
+
+
 }
