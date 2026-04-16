@@ -41,30 +41,48 @@ void lbm_comm_release_ex6(lbm_comm_t * comm)
 /****************************************************/
 void lbm_comm_ghost_exchange_ex6(lbm_comm_t * comm, lbm_mesh_t * mesh)
 {
-	//
-	// TODO: Implement the 2D communication with :
-	//         - non-blocking MPI functions
-	//         - use MPI type for non contiguous side 
-	//
-	// To be used:
-	//    - DIRECTIONS: the number of doubles composing a cell
-	//    - double[9] lbm_mesh_get_cell(mesh, x, y): function to get the address of a particular cell.
-	//    - comm->width : The with of the local sub-domain (containing the ghost cells)
-	//    - comm->height : The height of the local sub-domain (containing the ghost cells)
-	//
-	// TIP: create a function to get the target rank from x,y task coordinate.
-	// TIP: You can use MPI_PROC_NULL on borders.
-	// TIP: send the corner values 2 times, with the up/down/left/write communication
-	//      and with the diagonal communication in a second time, this avoid
-	//      special cases for border tasks.
-	// TIP: The previous trick require to make two batch of non-blocking communications.
+	int rank_left, rank_right, rank_up, rank_down;
+	MPI_Request requests[4];
+	
+	// Get neighbor ranks
+	MPI_Cart_shift(comm->communicator, 0, 1, &rank_left,  &rank_right);
+	MPI_Cart_shift(comm->communicator, 1, 1, &rank_up,    &rank_down);
 
-	//example to access cell
-	//double * cell = lbm_mesh_get_cell(mesh, local_x, local_y);
-	//double * cell = lbm_mesh_get_cell(mesh, comm->width - 1, 0);
+	// ----------------------------------------------------------------
+	// BATCH 1: LEFT / RIGHT (Contiguous columns)
+	// ----------------------------------------------------------------
+	
+	// Prepare receptions into ghost columns
+	MPI_Irecv(lbm_mesh_get_cell(mesh, 0, 0), comm->height * DIRECTIONS, MPI_DOUBLE, 
+	          rank_left, 0, comm->communicator, &requests[0]);
+	MPI_Irecv(lbm_mesh_get_cell(mesh, comm->width - 1, 0), comm->height * DIRECTIONS, MPI_DOUBLE, 
+	          rank_right, 1, comm->communicator, &requests[1]);
 
-	//TODO:
-	//   - implement left/write communications
-	//   - implement top/bottom communication (non contiguous)
-	//   - implement diagonal communications
+	// Prepare sends from border columns
+	MPI_Isend(lbm_mesh_get_cell(mesh, 1, 0), comm->height * DIRECTIONS, MPI_DOUBLE, 
+	          rank_left, 1, comm->communicator, &requests[2]);
+	MPI_Isend(lbm_mesh_get_cell(mesh, comm->width - 2, 0), comm->height * DIRECTIONS, MPI_DOUBLE, 
+	          rank_right, 0, comm->communicator, &requests[3]);
+
+	// Wait for Left/Right exchange to finish so corners are ready for Batch 2
+	MPI_Waitall(4, requests, MPI_STATUSES_IGNORE);
+
+	// ----------------------------------------------------------------
+	// BATCH 2: TOP / BOTTOM (Non-contiguous rows using MPI Datatype)
+	// ----------------------------------------------------------------
+
+	// Prepare receptions into ghost rows
+	MPI_Irecv(lbm_mesh_get_cell(mesh, 0, 0), 1, comm->type, 
+	          rank_up, 3, comm->communicator, &requests[0]);
+	MPI_Irecv(lbm_mesh_get_cell(mesh, 0, comm->height - 1), 1, comm->type, 
+	          rank_down, 2, comm->communicator, &requests[1]);
+
+	// Prepare sends from border rows
+	MPI_Isend(lbm_mesh_get_cell(mesh, 0, 1), 1, comm->type, 
+	          rank_up, 2, comm->communicator, &requests[2]);
+	MPI_Isend(lbm_mesh_get_cell(mesh, 0, comm->height - 2), 1, comm->type, 
+	          rank_down, 3, comm->communicator, &requests[3]);
+
+	// Final wait to ensure Top/Bottom exchange is complete before physics starts
+	MPI_Waitall(4, requests, MPI_STATUSES_IGNORE);
 }
