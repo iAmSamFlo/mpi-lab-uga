@@ -28,47 +28,79 @@
 /****************************************************/
 void lbm_comm_init_ex5(lbm_comm_t * comm, int total_width, int total_height)
 {
-	//we use the same implementation than ex5 execpt for type creation
+	// 1. Reuse the Cartesian topology and buffer allocation from Ex 4
 	lbm_comm_init_ex4(comm, total_width, total_height);
 
-	//TODO: create MPI type for non contiguous side in comm->type.
+	// 2. Create MPI type for non-contiguous rows
+	// A row consists of 'width' blocks.
+	// Each block contains 'DIRECTIONS' (9) doubles.
+	// The stride between the start of one cell and the next cell in a row 
+	// is (height * DIRECTIONS) because of column-major layout.
+	MPI_Type_vector(
+		comm->width,               // count: number of cells in a row
+		DIRECTIONS,                // blocklength: doubles per cell
+		comm->height * DIRECTIONS, // stride: distance between start of cells
+		MPI_DOUBLE,                // oldtype
+		&comm->type                // newtype
+	);
+
+	// 3. Commit the type so it can be used in communication
+	MPI_Type_commit(&comm->type);
 }
 
 /****************************************************/
 void lbm_comm_release_ex5(lbm_comm_t * comm)
 {
-	//we use the same implementation than ex5 except for type destroy
-	lbm_comm_release_ex4(comm);
+	// 1. Release the MPI Datatype
+	MPI_Type_free(&comm->type);
 
-	//TODO: release MPI type created in init.
+	// 2. Reuse the release function from Ex 4 to free buffers and communicator
+	lbm_comm_release_ex4(comm);
 }
 
 /****************************************************/
 void lbm_comm_ghost_exchange_ex5(lbm_comm_t * comm, lbm_mesh_t * mesh)
 {
-	//
-	// TODO: Implement the 2D communication with :
-	//         - blocking MPI functions
-	//         - use MPI type for non contiguous side 
-	//
-	// To be used:
-	//    - DIRECTIONS: the number of doubles composing a cell
-	//    - double[9] lbm_mesh_get_cell(mesh, x, y): function to get the address of a particular cell.
-	//    - comm->width : The with of the local sub-domain (containing the ghost cells)
-	//    - comm->height : The height of the local sub-domain (containing the ghost cells)
-	//
-	// TIP: create a function to get the target rank from x,y task coordinate.
-	// TIP: You can use MPI_PROC_NULL on borders.
-	// TIP: send the corner values 2 times, with the up/down/left/write communication
-	//      and with the diagonal communication in a second time, this avoid
-	//      special cases for border tasks.
+	int rank_left, rank_right, rank_up, rank_down;
+	
+	// Get neighbors from the Cartesian communicator
+	MPI_Cart_shift(comm->communicator, 0, 1, &rank_left,  &rank_right);
+	MPI_Cart_shift(comm->communicator, 1, 1, &rank_up,    &rank_down);
 
-	//example to access cell
-	//double * cell = lbm_mesh_get_cell(mesh, local_x, local_y);
-	//double * cell = lbm_mesh_get_cell(mesh, comm->width - 1, 0);
+	// ----------------------------------------------------------------
+	// STEP 1: LEFT / RIGHT (Contiguous columns)
+	// ----------------------------------------------------------------
+	// Send right border (x=width-2), receive into left ghost (x=0)
+	MPI_Sendrecv(
+		lbm_mesh_get_cell(mesh, comm->width - 2, 0), comm->height * DIRECTIONS, MPI_DOUBLE, rank_right, 0,
+		lbm_mesh_get_cell(mesh, 0,                0), comm->height * DIRECTIONS, MPI_DOUBLE, rank_left,  0,
+		comm->communicator, MPI_STATUS_IGNORE
+	);
 
-	//TODO:
-	//   - implement left/write communications
-	//   - implement top/bottom communication (non contiguous)
-	//   - implement diagonal communications
+	// Send left border (x=1), receive into right ghost (x=width-1)
+	MPI_Sendrecv(
+		lbm_mesh_get_cell(mesh, 1,               0), comm->height * DIRECTIONS, MPI_DOUBLE, rank_left,  1,
+		lbm_mesh_get_cell(mesh, comm->width - 1, 0), comm->height * DIRECTIONS, MPI_DOUBLE, rank_right, 1,
+		comm->communicator, MPI_STATUS_IGNORE
+	);
+
+	// ----------------------------------------------------------------
+	// STEP 2: TOP / BOTTOM (Non-contiguous rows using MPI Datatype)
+	// By exchanging full width (0 to width-1), corners are handled 
+	// automatically because Step 1 is already finished.
+	// ----------------------------------------------------------------
+
+	// Exchange Top: Send real row (y=1) UP, receive into BOTTOM ghost (y=height-1)
+	MPI_Sendrecv(
+		lbm_mesh_get_cell(mesh, 0, 1),                1, comm->type, rank_up,   2,
+		lbm_mesh_get_cell(mesh, 0, comm->height - 1), 1, comm->type, rank_down, 2,
+		comm->communicator, MPI_STATUS_IGNORE
+	);
+
+	// Exchange Bottom: Send real row (y=height-2) DOWN, receive into TOP ghost (y=0)
+	MPI_Sendrecv(
+		lbm_mesh_get_cell(mesh, 0, comm->height - 2), 1, comm->type, rank_down, 3,
+		lbm_mesh_get_cell(mesh, 0, 0),                1, comm->type, rank_up,   3,
+		comm->communicator, MPI_STATUS_IGNORE
+	);
 }
